@@ -8,15 +8,10 @@ import com.google.gson.stream.JsonWriter
 import com.stanfy.gsonxml.GsonXmlBuilder
 import com.stanfy.gsonxml.XmlParserCreator
 import javafx.scene.image.Image
-import org.xmlpull.v1.XmlPullParser
 import org.xmlpull.v1.XmlPullParserFactory
-import java.io.File
-import java.io.FileReader
 import java.io.InputStreamReader
 import java.nio.file.Paths
 import java.util.zip.ZipFile
-import kotlin.reflect.KClass
-import kotlin.reflect.full.memberProperties
 
 enum class ArmorType(val internalName:String) {
     Immaterial("arm_unarmored"),
@@ -42,7 +37,7 @@ enum class AttackMode(val internalName: String) {
 }
 
 enum class UnitClass(val internalName: String) {
-    Fighter("ai_figher"),
+    Fighter("ai_fighter"),
     Creature("ai_creature"),
     Mercenary("ai_attacker"),
     None("ai_none"),
@@ -50,6 +45,7 @@ enum class UnitClass(val internalName: String) {
     Worker("ai_worker"),
     Illegal("")
 }
+/*
 enum class Legion(val internalName: String) {
     Element("element_legion_id"),
     Mech("mech_legion_id"),
@@ -60,10 +56,17 @@ enum class Legion(val internalName: String) {
     Aspect("aspect_legion_id"),
     Illegal("")
 }
-
+*/
+data class Legion(
+        @SerializedName("@id") val id:String,
+        @SerializedName("playable") val playable:Boolean,
+        @SerializedName("iconpath") val iconPath:String,
+        @SerializedName("name") val name:String
+)
+data class Legions(@SerializedName("legion") val legions:List<Legion>)
 data class UnitDef(
         @SerializedName("@id") val id:String,
-        @SerializedName("legion") val legion:Legion,
+        @SerializedName("legion") val legion:String,
         @SerializedName("unitclass") val unitClass:UnitClass,
         @SerializedName("aspd") val attackSpeed:Double,
         @SerializedName("armortype") val armorType: ArmorType,
@@ -79,14 +82,15 @@ data class UnitDef(
         @SerializedName("mp") val mana:Int,
         @SerializedName("mpregen") val manaRegen:Double,
         @SerializedName("mythiumcost") val mythiumCost:Int,
-        @SerializedName("splashpath") val splashPath:String,
+        @SerializedName("splashpath") val iconPath:String,
+        @SerializedName("name") val name:String,
         @SerializedName("upgradesfrom") val upgradesFrom:String?,
         @SerializedName("totalvalue") val totalValue:Int,
         @SerializedName("totalfood") val totalFood:Int,
         @SerializedName("incomebonus") val incomeBonus:Int
 ) {
     fun loadImage() : Image? {
-        val name = splashPath.replace("Splashes/", "icons/")
+        val name = iconPath.replace("Splashes/", "icons/")
         val file = Paths.get(name).toFile()
         if( file.exists() ) {
             return Image(file.toURI().toURL().toString())
@@ -184,11 +188,6 @@ class AttackModeAdapter : PrimitivTypeAdapter<AttackMode>("preset") {
         return AttackMode.values().find { it.internalName==value }
     }
 }
-class LegionAdapter : PrimitivTypeAdapter<Legion>("legion_id") {
-    override fun convert(value: String): Legion? {
-        return Legion.values().find { it.internalName==value }
-    }
-}
 class UnitClassAdapter : PrimitivTypeAdapter<UnitClass>("preset") {
     override fun convert(value: String): UnitClass? {
         return UnitClass.values().find { it.internalName==value }
@@ -203,6 +202,11 @@ class DoubleTypeAdapter : PrimitivTypeAdapter<Double>("double") {
 class IntTypeAdapter : PrimitivTypeAdapter<Int>("int") {
     override fun convert(value: String): Int? {
         return value.toInt()
+    }
+}
+class BooleanTypeAdapter : PrimitivTypeAdapter<Boolean>("*") {
+    override fun convert(value: String): Boolean? {
+        return value.endsWith("yes")
     }
 }
 data class DecimalArray(val list:List<Double>) {
@@ -224,15 +228,12 @@ class StringTypeAdapter : PrimitivTypeAdapter<String>("*") {
     }
 }
 
-data class GameData(val unitDefs: UnitDefs, val global: Global, val waveDefs: WaveDefs)
+data class GameData(val legions:Legions, val unitDefs: UnitDefs, val global: Global, val waveDefs: WaveDefs)
 fun loadData(ltd2Folder:String) : GameData {
-    val p = object : XmlParserCreator{
-        override fun createParser(): XmlPullParser {
-            return XmlPullParserFactory.newInstance().newPullParser()
-        }
-    }
+    val p = XmlParserCreator { XmlPullParserFactory.newInstance().newPullParser() }
     val builder = GsonBuilder()
             .registerTypeAdapter(Double::class.java, DoubleTypeAdapter())
+            .registerTypeAdapter(Boolean::class.java, BooleanTypeAdapter())
             .registerTypeAdapter(String::class.java, StringTypeAdapter())
             .registerTypeAdapter(Int::class.java, IntTypeAdapter())
             .registerTypeAdapter(DecimalArray::class.java, DoubleListTypeAdapter())
@@ -241,12 +242,13 @@ fun loadData(ltd2Folder:String) : GameData {
             .registerTypeAdapter(ArmorType::class.java, ArmorTypeAdapter())
             .registerTypeAdapter(AttackMode::class.java, AttackModeAdapter())
             .registerTypeAdapter(UnitClass::class.java, UnitClassAdapter())
-            .registerTypeAdapter(Legion::class.java, LegionAdapter())
+//            .registerTypeAdapter(Legion::class.java, LegionAdapter())
     val gsonXml = GsonXmlBuilder().wrap(builder).setXmlParserCreator(p).setSameNameLists(true).create()
     val zipFile = "$ltd2Folder\\Legion TD 2_Data\\StreamingAssets\\Maps\\legiontd2.zip"
     val zip = ZipFile(zipFile)
+    val legions = gsonXml.fromXml(InputStreamReader(zip.getInputStream(zip.getEntry("legions.xml"))), Legions::class.java)
     val units = gsonXml.fromXml(InputStreamReader(zip.getInputStream(zip.getEntry("units.xml"))), UnitDefs::class.java)
     val globals = gsonXml.fromXml(InputStreamReader(zip.getInputStream(zip.getEntry("globals.xml"))), Globals::class.java).globals[0]
     val waves = gsonXml.fromXml(InputStreamReader(zip.getInputStream(zip.getEntry("waves.xml"))), WaveDefs::class.java)
-    return GameData(units, globals, waves)
+    return GameData(legions, units, globals, waves)
 }
